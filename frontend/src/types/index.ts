@@ -128,12 +128,15 @@ export interface SystemStatus {
 export interface ExtractorHealth {
   ytdlp_version: string;
   ytdlp_operational: boolean;
+  ejs_installed?: boolean;
+  ejs_version?: string;
   js_runtime_configured: string;
   node_detected: boolean;
   node_version?: string;
   node_path?: string;
   deno_detected: boolean;
   deno_version?: string;
+  deno_path?: string;
   ffmpeg_detected: boolean;
   ffmpeg_version?: string;
   detected_browsers: string[];

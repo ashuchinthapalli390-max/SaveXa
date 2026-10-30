@@ -126,13 +126,27 @@ class YtDlpDownloader(BaseDownloader):
             }
         }
 
-        # Configure external JavaScript runtime (Node.js or Deno)
-        node_path = shutil.which("node")
+        # Configure external JavaScript runtime (Deno and/or Node.js)
         deno_path = shutil.which("deno")
+        if not deno_path:
+            for p in [
+                Path.home() / ".deno" / "bin" / "deno.exe",
+                Path(os.environ.get("LOCALAPPDATA", "")) / "Microsoft" / "WinGet" / "Packages" / "DenoLand.Deno_Microsoft.Winget.Source_8wekyb3d8bbwe" / "deno.exe",
+                Path(os.environ.get("LOCALAPPDATA", "")) / "Microsoft" / "WinGet" / "Links" / "deno.exe",
+            ]:
+                if p.is_file():
+                    deno_path = str(p)
+                    break
+
+        node_path = shutil.which("node")
+
+        runtimes = {}
+        if deno_path:
+            runtimes["deno"] = {"path": str(deno_path)}
         if node_path:
-            opts["js_runtimes"] = {"node": {"path": node_path}}
-        elif deno_path:
-            opts["js_runtimes"] = {"deno": {"path": deno_path}}
+            runtimes["node"] = {"path": str(node_path)}
+        if runtimes:
+            opts["js_runtimes"] = runtimes
 
         # Check for cookies file in data directory
         cookie_file = settings.DATA_DIR / "cookies.txt"
@@ -319,6 +333,26 @@ class YtDlpDownloader(BaseDownloader):
         dest_path.mkdir(parents=True, exist_ok=True)
 
         downloaded_file_holder: list[str] = []
+
+        # Check for existing completed file on disk matching video ID
+        m_id = re.search(r"(?:v=|\/)([0-9A-Za-z_-]{11})", url)
+        if m_id:
+            vid = m_id.group(1)
+            matching = [p for p in dest_path.glob(f"*{vid}*") if p.is_file() and p.stat().st_size > 1024]
+            if matching:
+                existing_file = matching[0]
+                size = existing_file.stat().st_size
+                logger.info(f"File for video {vid} already exists on disk: {existing_file.name}. Skipping download.")
+                progress_callback({
+                    "status": "COMPLETED",
+                    "downloaded_bytes": size,
+                    "total_bytes": size,
+                    "progress": 100.0,
+                    "speed": 0.0,
+                    "eta": 0,
+                    "output_path": str(existing_file.resolve()),
+                })
+                return str(existing_file.resolve())
 
         # Initial CONNECTING event
         progress_callback({

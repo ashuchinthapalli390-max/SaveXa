@@ -14,6 +14,19 @@ if (-not (Test-Path "backend\.venv")) {
 Write-Host "`n[2/4] Installing backend dependencies..." -ForegroundColor Yellow
 .\backend\.venv\Scripts\python -m pip install --upgrade pip
 .\backend\.venv\Scripts\pip install -r backend\requirements.txt
+.\backend\.venv\Scripts\pip install -U "yt-dlp[default]"
+
+# Check for JavaScript runtime (Deno or Node.js)
+$denoInstalled = (Get-Command deno -ErrorAction SilentlyContinue) -ne $null
+$nodeInstalled = (Get-Command node -ErrorAction SilentlyContinue) -ne $null
+if (-not $denoInstalled -and -not $nodeInstalled) {
+    Write-Host "[!] Neither Deno nor Node.js detected. Installing Deno via winget..." -ForegroundColor Yellow
+    try {
+        winget install --id DenoLand.Deno --accept-source-agreements --accept-package-agreements --silent
+    } catch {
+        Write-Host "[!] Note: Install Node.js or Deno for YouTube EJS challenge processing." -ForegroundColor Yellow
+    }
+}
 
 # 3. Install frontend dependencies
 Write-Host "`n[3/4] Installing frontend dependencies..." -ForegroundColor Yellow

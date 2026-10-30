@@ -1,4 +1,6 @@
+import re
 import uuid
+from pathlib import Path
 from typing import List
 from fastapi import APIRouter, HTTPException
 from sqlalchemy import select, desc
@@ -28,9 +30,19 @@ async def create_batch(req: CreateBatchRequest):
     async with AsyncSessionLocal() as session:
         # Check duplicates if enabled
         completed_urls = set()
+        existing_video_ids = set()
         if req.skip_duplicates:
             hist_res = await session.execute(select(DownloadHistory.source_url))
             completed_urls = set(hist_res.scalars().all())
+
+            # Check destination directory for already completed media files
+            target_path = Path(dest_dir)
+            if target_path.is_dir():
+                for p in target_path.iterdir():
+                    if p.is_file() and p.stat().st_size > 1024:
+                        m = re.search(r'\[([0-9A-Za-z_-]{11})\]', p.name)
+                        if m:
+                            existing_video_ids.add(m.group(1))
 
         batch = Batch(
             id=batch_id,
@@ -48,7 +60,12 @@ async def create_batch(req: CreateBatchRequest):
 
         jobs = []
         for idx, item in enumerate(req.items):
-            is_dup = req.skip_duplicates and (item.url in completed_urls)
+            m_item = re.search(r'(?:v=|\/)([0-9A-Za-z_-]{11})', item.url)
+            vid = m_item.group(1) if m_item else None
+            is_dup = req.skip_duplicates and (
+                item.url in completed_urls or
+                (vid and vid in existing_video_ids)
+            )
             job_status = "SKIPPED" if is_dup else ("QUEUED" if req.auto_start else "READY")
             
             job = DownloadJob(

@@ -526,13 +526,22 @@ class WorkerPool:
         except Exception as e:
             err_msg = str(e)
             logger.error(f"Job {job_id} failed: {err_msg}")
+            from app.downloaders.ytdlp import classify_ytdlp_error
             async with AsyncSessionLocal() as session:
                 job = await session.get(DownloadJob, job_id)
                 if job:
-                    if job.retry_count < job.max_retries and "cancelled" not in err_msg.lower() and "unavailable" not in err_msg.lower() and "private" not in err_msg.lower():
+                    status_enum, code, user_msg, _ = classify_ytdlp_error(job.source_url, e)
+                    no_retry_keywords = ["cancelled", "unavailable", "private", "bot", "sign in to confirm", "captcha", "too many requests", "429"]
+                    can_retry = (
+                        job.retry_count < job.max_retries and
+                        not any(k in err_msg.lower() for k in no_retry_keywords)
+                    )
+
+                    if can_retry:
                         job.retry_count += 1
                         job.status = "QUEUED"
-                        job.error_message = f"Retry {job.retry_count}/{job.max_retries}: {err_msg}"
+                        job.error_code = code
+                        job.error_message = f"Retry {job.retry_count}/{job.max_retries}: {user_msg}"
                         await session.commit()
                         logger.info(f"Job {job_id} re-enqueued for retry ({job.retry_count}/{job.max_retries})")
                         await ws_manager.broadcast({
@@ -543,7 +552,8 @@ class WorkerPool:
                         })
                     else:
                         job.status = "FAILED"
-                        job.error_message = err_msg
+                        job.error_code = code
+                        job.error_message = f"{user_msg} ({code})"
                         if job.batch_id:
                             batch = await session.get(Batch, job.batch_id)
                             if batch:
@@ -556,7 +566,8 @@ class WorkerPool:
                             "event": "JOB_FAILED",
                             "job_id": job_id,
                             "status": "FAILED",
-                            "error_message": err_msg
+                            "error_message": job.error_message,
+                            "error_code": code
                         })
         finally:
             self.active_tasks.pop(job_id, None)

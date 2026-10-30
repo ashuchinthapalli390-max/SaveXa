@@ -339,36 +339,57 @@ export const Settings: React.FC = () => {
         </div>
 
         {/* Runtime Diagnostics Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
           <div className="p-3.5 rounded-xl bg-[#111a2b] border border-[#26354c] space-y-1">
             <div className="flex items-center justify-between">
-              <span className="text-[11px] text-slate-400 uppercase font-semibold">yt-dlp Extractor</span>
+              <span className="text-[11px] text-slate-400 uppercase font-semibold">yt-dlp Engine</span>
               <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
                 Active
               </span>
             </div>
             <p className="text-xs font-mono font-bold text-white">v{extractorHealth?.ytdlp_version || "2026.10.26"}</p>
-            <p className="text-[10px] text-slate-500">Universal web extractor</p>
+            <p className="text-[10px] text-slate-500">Universal media extractor</p>
           </div>
 
           <div className="p-3.5 rounded-xl bg-[#111a2b] border border-[#26354c] space-y-1">
             <div className="flex items-center justify-between">
-              <span className="text-[11px] text-slate-400 uppercase font-semibold">JS Runtime (EJS)</span>
+              <span className="text-[11px] text-slate-400 uppercase font-semibold">yt-dlp-ejs</span>
               <span
                 className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                  extractorHealth?.node_detected || extractorHealth?.deno_detected
+                  extractorHealth?.ejs_installed
                     ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
                     : "bg-amber-500/10 text-amber-400 border border-amber-500/20"
                 }`}
               >
-                {extractorHealth?.node_detected ? "Node.js (Active)" : extractorHealth?.deno_detected ? "Deno (Active)" : "Missing"}
+                {extractorHealth?.ejs_installed ? "Installed" : "Missing"}
               </span>
             </div>
             <p className="text-xs font-mono font-bold text-white">
-              {extractorHealth?.node_version || extractorHealth?.deno_version || "None"}
+              {extractorHealth?.ejs_installed ? `v${extractorHealth.ejs_version || "0.8.0"}` : "None"}
             </p>
-            <p className="text-[10px] text-slate-500 truncate" title={extractorHealth?.node_path || ""}>
-              {extractorHealth?.node_path ? "Path verified" : "Required for modern JS extraction"}
+            <p className="text-[10px] text-slate-500">Challenge execution package</p>
+          </div>
+
+          <div className="p-3.5 rounded-xl bg-[#111a2b] border border-[#26354c] space-y-1">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] text-slate-400 uppercase font-semibold">JS Runtimes</span>
+              <span
+                className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                  extractorHealth?.deno_detected || extractorHealth?.node_detected
+                    ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                    : "bg-amber-500/10 text-amber-400 border border-amber-500/20"
+                }`}
+              >
+                {extractorHealth?.deno_detected ? "Deno + Node" : extractorHealth?.node_detected ? "Node.js" : "Missing"}
+              </span>
+            </div>
+            <p className="text-xs font-mono font-bold text-white truncate">
+              {extractorHealth?.deno_detected
+                ? `Deno ${extractorHealth.deno_version?.split(" ")[1] || "2.9.8"}`
+                : extractorHealth?.node_version || "None"}
+            </p>
+            <p className="text-[10px] text-slate-500 truncate">
+              {extractorHealth?.node_detected ? `Node ${extractorHealth.node_version} available` : "Sandbox JS executor"}
             </p>
           </div>
 

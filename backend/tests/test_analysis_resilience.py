@@ -182,6 +182,6 @@ async def test_extractor_health_endpoint():
     health = await get_extractor_health()
     assert health.ytdlp_operational is True
     assert health.node_detected is True
-    assert health.js_runtime_configured == "node"
+    assert health.js_runtime_configured in ("deno", "node")
     assert len(health.detected_browsers) > 0
     assert len(health.notes) > 0

@@ -44,7 +44,14 @@ SaveXa is a premium local media download manager running on `http://localhost:30
 - Survived browser refresh or machine reboot: interrupted downloads are safely recovered without re-downloading completed files.
 - Real-time updates via WebSocket (`/ws`) throttled for high UI performance.
 
-### 8. Security & SSRF Protection
+### 8. Source Compatibility & YouTube Access Challenge Diagnostics
+- **EJS Execution**: Bundles `yt-dlp[default]` and `yt-dlp-ejs` with dual JavaScript runtime engines (**Deno** preferred + **Node.js** fallback) to handle dynamic web challenges.
+- **Anti-Bot Circuit Breaker**: Gracefully handles YouTube IP throttling (HTTP 429) by pausing automated requests to preserve network reputation while preserving 100% of submitted URLs.
+- **Duplicate Skipping Engine**: Identifies already completed downloads both in SQLite database history and on disk (`*[<video_id>].*`), preventing duplicate downloads.
+- **Session Cookie Support**: Detects and loads Netscape-formatted `backend/data/cookies.txt` without browser database locking issues on Windows.
+- Detailed documentation in [docs/YOUTUBE_ACCESS_CHALLENGE_REPAIR.md](docs/YOUTUBE_ACCESS_CHALLENGE_REPAIR.md) and [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md).
+
+### 9. Security & SSRF Protection
 - Strict protocol restrictions (only `http://` and `https://` remote URLs).
 - Blocks SSRF: rejects loopback (`127.0.0.1`, `localhost`), link-local (`169.254.169.254`), and private RFC 1918 subnets.
 - Windows filename sanitization: escapes reserved device names (`CON`, `PRN`, `AUX`, `NUL`, etc.) and removes illegal characters (`< > : " / \ | ? *`).

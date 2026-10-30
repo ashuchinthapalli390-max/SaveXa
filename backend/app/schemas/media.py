@@ -173,12 +173,15 @@ class SystemStatusResponse(BaseModel):
 class ExtractorHealthResponse(BaseModel):
     ytdlp_version: str
     ytdlp_operational: bool
+    ejs_installed: bool = False
+    ejs_version: Optional[str] = None
     js_runtime_configured: str
     node_detected: bool
     node_version: Optional[str] = None
     node_path: Optional[str] = None
     deno_detected: bool
     deno_version: Optional[str] = None
+    deno_path: Optional[str] = None
     ffmpeg_detected: bool
     ffmpeg_version: Optional[str] = None
     detected_browsers: List[str] = Field(default_factory=list)
