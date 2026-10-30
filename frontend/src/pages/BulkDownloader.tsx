@@ -19,6 +19,16 @@ import {
   Clock,
   Play,
   RotateCcw,
+  ShieldAlert,
+  ExternalLink,
+  ChevronDown,
+  ChevronUp,
+  Copy,
+  Download,
+  HelpCircle,
+  WifiOff,
+  Lock,
+  RefreshCw,
 } from "lucide-react";
 import { api } from "../services/api";
 import { MediaMetadata } from "../types";
@@ -38,6 +48,11 @@ export const BulkDownloader: React.FC = () => {
   const [destinationFolder, setDestinationFolder] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  // Filter & disclosure states
+  const [filterTab, setFilterTab] = useState<"all" | "available" | "attention" | "unavailable">("all");
+  const [expandedErrors, setExpandedErrors] = useState<Record<string, boolean>>({});
+  const [copiedNotification, setCopiedNotification] = useState<string | null>(null);
 
   // Live URL parsing stats
   const urlStats = useMemo(() => {
@@ -126,7 +141,7 @@ export const BulkDownloader: React.FC = () => {
       const results = await api.analyzeBulk(urlsToAnalyze);
       const initialized = results.map((item) => ({
         ...item,
-        selected: item.is_valid,
+        selected: item.is_valid && item.is_selectable !== false,
         targetQuality: selectedPreset === "audio_only" ? "audio" : selectedPreset === "high_mp4" ? "1080p" : "original",
         targetFormat: selectedPreset === "audio_only" ? "mp3" : "mp4",
       }));
@@ -163,14 +178,97 @@ export const BulkDownloader: React.FC = () => {
     );
   };
 
-  const selectedItems = useMemo(() => mediaItems.filter((i) => i.selected && i.is_valid), [mediaItems]);
+  // Selection calculations (strictly scoped to eligible items)
+  const eligibleItems = useMemo(
+    () => mediaItems.filter((i) => i.is_valid && i.is_selectable !== false),
+    [mediaItems]
+  );
+  const eligibleCount = eligibleItems.length;
+
+  const selectedItems = useMemo(
+    () => mediaItems.filter((i) => i.selected && i.is_valid && i.is_selectable !== false),
+    [mediaItems]
+  );
+  const selectedCount = selectedItems.length;
+
+  // Crucial bug fix: allSelected can only be true if eligibleCount > 0
+  const allSelected = eligibleCount > 0 && selectedCount === eligibleCount;
+  const isIndeterminate = selectedCount > 0 && selectedCount < eligibleCount;
 
   const toggleSelectAll = (checked: boolean) => {
-    setMediaItems((prev) => prev.map((item) => ({ ...item, selected: item.is_valid ? checked : false })));
+    if (eligibleCount === 0) return;
+    setMediaItems((prev) =>
+      prev.map((item) => ({
+        ...item,
+        selected: item.is_valid && item.is_selectable !== false ? checked : false,
+      }))
+    );
   };
 
-  const allSelected = mediaItems.length > 0 && selectedItems.length === mediaItems.filter((i) => i.is_valid).length;
-  const isIndeterminate = selectedItems.length > 0 && !allSelected;
+  // Categorized counts for tabs
+  const attentionItems = useMemo(
+    () =>
+      mediaItems.filter(
+        (i) => i.analysis_status === "SOURCE_ACCESS_CHALLENGE" || i.analysis_status === "RATE_LIMITED"
+      ),
+    [mediaItems]
+  );
+  const attentionCount = attentionItems.length;
+
+  const unavailableItems = useMemo(
+    () =>
+      mediaItems.filter(
+        (i) =>
+          !i.is_valid &&
+          i.analysis_status !== "SOURCE_ACCESS_CHALLENGE" &&
+          i.analysis_status !== "RATE_LIMITED"
+      ),
+    [mediaItems]
+  );
+  const unavailableCount = unavailableItems.length;
+
+  // Filtered view items
+  const displayedItems = useMemo(() => {
+    if (filterTab === "available") return eligibleItems;
+    if (filterTab === "attention") return attentionItems;
+    if (filterTab === "unavailable") return unavailableItems;
+    return mediaItems;
+  }, [filterTab, eligibleItems, attentionItems, unavailableItems, mediaItems]);
+
+  const toggleErrorDisclosure = (url: string) => {
+    setExpandedErrors((prev) => ({
+      ...prev,
+      [url]: !prev[url],
+    }));
+  };
+
+  const handleCopyPreservedUrls = async (urlsToCopy?: string[]) => {
+    const list = urlsToCopy || mediaItems.map((i) => i.url);
+    if (list.length === 0) return;
+    try {
+      await navigator.clipboard.writeText(list.join("\n"));
+      setCopiedNotification(`Copied ${list.length} URLs to clipboard`);
+      setTimeout(() => setCopiedNotification(null), 3500);
+    } catch {
+      // Ignore
+    }
+  };
+
+  const handleExportTxtFile = () => {
+    if (mediaItems.length === 0) return;
+    const content = mediaItems
+      .map((i) => `${i.url} # ${i.title} [${i.analysis_status || (i.is_valid ? "AVAILABLE" : "ERROR")}]`)
+      .join("\n");
+    const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `SaveXa_Preserved_Links_${new Date().toISOString().slice(0, 10)}.txt`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
 
   const handleStartDownload = async () => {
     if (selectedItems.length === 0) return;
@@ -226,7 +324,7 @@ export const BulkDownloader: React.FC = () => {
           Bulk Downloader
         </h2>
         <p className="text-sm text-slate-400 mt-1">
-          Queue up to 200 media links simultaneously with bounded concurrency, automatic deduplication, and original quality preservation.
+          Queue up to 200 media links simultaneously with source-aware polite pacing, automated anti-bot circuit breaking, and persistent link preservation.
         </p>
       </div>
 
@@ -413,131 +511,337 @@ export const BulkDownloader: React.FC = () => {
       {/* Discovered Media Items Table */}
       {mediaItems.length > 0 && (
         <div className="rounded-2xl border border-[#1e293b] bg-[#0b1220] shadow-lg overflow-hidden space-y-4 p-5">
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-[#1e293b] pb-4">
-            <div>
-              <h3 className="text-base font-bold text-white flex items-center gap-2">
-                <span>Discovered Media Items</span>
-                <span className="px-2.5 py-0.5 rounded-full bg-blue-500/20 text-blue-300 text-xs font-semibold">
-                  {selectedItems.length} of {mediaItems.length} selected
-                </span>
-              </h3>
+          {/* Header & Filter Controls */}
+          <div className="flex flex-col gap-4 border-b border-[#1e293b] pb-4">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+              <div>
+                <h3 className="text-base font-bold text-white flex items-center gap-2">
+                  <span>Discovered Media Items</span>
+                  <span
+                    className={`px-2.5 py-0.5 rounded-full text-xs font-semibold ${
+                      eligibleCount > 0
+                        ? "bg-blue-500/20 text-blue-300"
+                        : "bg-amber-500/10 border border-amber-500/30 text-amber-300"
+                    }`}
+                  >
+                    {eligibleCount > 0
+                      ? `${selectedCount} of ${eligibleCount} eligible selected`
+                      : `0 of ${mediaItems.length} available (${mediaItems.length} links preserved)`}
+                  </span>
+                </h3>
+              </div>
+
+              {/* Action Buttons: Export & Select All */}
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  onClick={() => handleCopyPreservedUrls()}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#111a2b] border border-[#26354c] hover:bg-[#172338] text-xs font-medium text-slate-300 hover:text-white transition-colors cursor-pointer"
+                  title="Copy all preserved URLs to clipboard"
+                >
+                  <Copy size={13} className="text-blue-400" />
+                  <span>Copy URLs</span>
+                </button>
+
+                <button
+                  onClick={handleExportTxtFile}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#111a2b] border border-[#26354c] hover:bg-[#172338] text-xs font-medium text-slate-300 hover:text-white transition-colors cursor-pointer"
+                  title="Export all URLs with diagnostic status to TXT file"
+                >
+                  <Download size={13} className="text-emerald-400" />
+                  <span>Export TXT</span>
+                </button>
+
+                <div className="pl-2 border-l border-[#26354c]">
+                  <Checkbox
+                    id="select-all-media"
+                    checked={allSelected}
+                    indeterminate={isIndeterminate}
+                    disabled={eligibleCount === 0}
+                    onChange={toggleSelectAll}
+                    label="Select All"
+                  />
+                </div>
+              </div>
             </div>
 
-            <div className="flex items-center gap-2">
-              <Checkbox
-                id="select-all-media"
-                checked={allSelected}
-                indeterminate={isIndeterminate}
-                onChange={toggleSelectAll}
-                label="Select All"
-              />
+            {/* Notification Bar if Copied */}
+            {copiedNotification && (
+              <div className="px-3 py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-xs flex items-center gap-2">
+                <Check size={14} />
+                <span>{copiedNotification}</span>
+              </div>
+            )}
+
+            {/* Filter Tabs */}
+            <div className="flex flex-wrap items-center gap-2 pt-1">
+              {[
+                { id: "all", label: `All (${mediaItems.length})` },
+                { id: "available", label: `Available (${eligibleCount})`, count: eligibleCount },
+                { id: "attention", label: `Requires Attention (${attentionCount})`, count: attentionCount },
+                { id: "unavailable", label: `Unavailable (${unavailableCount})`, count: unavailableCount },
+              ].map((tab) => (
+                <button
+                  key={tab.id}
+                  onClick={() => setFilterTab(tab.id as any)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                    filterTab === tab.id
+                      ? "bg-blue-600 text-white shadow-md shadow-blue-900/30"
+                      : "bg-[#111a2b] text-slate-400 hover:text-slate-200 border border-[#26354c]"
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
             </div>
           </div>
 
-          <div className="space-y-2 max-h-[500px] overflow-y-auto pr-1">
-            {mediaItems.map((item, idx) => {
-              const qualityOptions: SelectOption[] = [
-                { value: "original", label: "Original Quality" },
-                ...item.available_qualities
-                  .filter((q) => q !== "original")
-                  .map((q) => ({ value: q, label: q })),
-              ];
+          {/* Attention Banner when 0 eligible items */}
+          {eligibleCount === 0 && (
+            <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/30 space-y-3">
+              <div className="flex items-start gap-3">
+                <ShieldAlert size={20} className="text-amber-400 flex-shrink-0 mt-0.5" />
+                <div className="space-y-1">
+                  <h4 className="text-xs font-bold text-amber-200 uppercase tracking-wide">
+                    Source Access Challenge Detected — 0 of {mediaItems.length} items ready for download
+                  </h4>
+                  <p className="text-xs text-amber-300/90 leading-relaxed">
+                    YouTube anti-bot verification was requested for automated queries from this IP. To prevent rate limiting or temporary blocking, subsequent requests were safely paused.
+                    All <span className="font-bold text-white">{mediaItems.length} links are preserved below</span> for review, direct browsing, or clipboard export.
+                  </p>
+                </div>
+              </div>
 
-              return (
-                <div
-                  key={idx}
-                  className={`p-3.5 rounded-xl border flex items-center justify-between gap-3 transition-all ${
-                    item.selected
-                      ? "bg-[#111a2b] border-blue-500/30 shadow-[0_0_15px_rgba(37,99,235,0.1)]"
-                      : "bg-[#080d17]/60 border-[#1e293b] opacity-60"
-                  }`}
+              <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-amber-500/20 text-xs">
+                <button
+                  onClick={() => handleCopyPreservedUrls()}
+                  className="px-3 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-200 font-semibold cursor-pointer transition-colors"
                 >
-                  <div className="flex items-center gap-3 flex-1 min-w-0">
-                    <Checkbox
-                      checked={!!item.selected}
-                      onChange={(checked) => {
-                        setMediaItems((prev) =>
-                          prev.map((it, i) => (i === idx ? { ...it, selected: checked } : it))
-                        );
-                      }}
-                      disabled={!item.is_valid}
-                    />
+                  Copy All {mediaItems.length} Preserved Links
+                </button>
+                <button
+                  onClick={() => navigate("/settings")}
+                  className="px-3 py-1.5 rounded-lg bg-[#111a2b] hover:bg-[#172338] border border-[#26354c] text-slate-200 font-semibold cursor-pointer transition-colors"
+                >
+                  Open Diagnostics in Settings
+                </button>
+              </div>
+            </div>
+          )}
 
-                    {/* Thumbnail */}
-                    <div className="w-12 h-9 rounded-lg overflow-hidden bg-black/40 flex-shrink-0 border border-[#26354c]">
-                      {item.thumbnail ? (
-                        <img src={item.thumbnail} alt="" className="w-full h-full object-cover" />
-                      ) : (
-                        <div className="w-full h-full flex items-center justify-center text-[9px] text-slate-500 uppercase">
-                          {item.source}
+          {/* Media Items List */}
+          <div className="space-y-2.5 max-h-[550px] overflow-y-auto pr-1">
+            {displayedItems.length === 0 ? (
+              <div className="py-8 text-center text-xs text-slate-500">
+                No items match the selected tab filter.
+              </div>
+            ) : (
+              displayedItems.map((item, idx) => {
+                const originalIndex = mediaItems.findIndex((it) => it.url === item.url);
+                const isItemValid = item.is_valid && item.is_selectable !== false;
+                const isChallenge =
+                  item.analysis_status === "SOURCE_ACCESS_CHALLENGE" ||
+                  item.analysis_status === "RATE_LIMITED";
+
+                const qualityOptions: SelectOption[] = [
+                  { value: "original", label: "Original Quality" },
+                  ...item.available_qualities
+                    .filter((q) => q !== "original")
+                    .map((q) => ({ value: q, label: q })),
+                ];
+
+                return (
+                  <div
+                    key={`${item.url}-${idx}`}
+                    className={`p-3.5 rounded-xl border transition-all ${
+                      isItemValid
+                        ? item.selected
+                          ? "bg-[#111a2b] border-blue-500/40 shadow-[0_0_15px_rgba(37,99,235,0.1)]"
+                          : "bg-[#0b1220] border-[#1e293b]"
+                        : isChallenge
+                        ? "bg-[#0c1424] border-amber-500/20 hover:border-amber-500/40"
+                        : "bg-[#0c1424] border-red-500/20 hover:border-red-500/40"
+                    }`}
+                  >
+                    <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                      <div className="flex items-start sm:items-center gap-3 flex-1 min-w-0">
+                        {/* Checkbox: strictly disabled on invalid or challenge items */}
+                        <div className="pt-0.5 sm:pt-0">
+                          <Checkbox
+                            checked={!!item.selected}
+                            disabled={!isItemValid}
+                            onChange={(checked) => {
+                              if (!isItemValid) return;
+                              setMediaItems((prev) =>
+                                prev.map((it, i) => (i === originalIndex ? { ...it, selected: checked } : it))
+                              );
+                            }}
+                          />
                         </div>
-                      )}
-                    </div>
 
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs font-semibold text-white truncate" title={item.title}>
-                        {item.title}
-                      </p>
-                      <div className="flex items-center gap-2 mt-0.5 text-[11px] text-slate-400">
-                        <span className="capitalize text-slate-300">{item.source}</span>
-                        {item.duration ? <span>• {Math.round(item.duration)}s</span> : null}
-                        {!item.is_valid && (
-                          <span className="text-red-400 font-medium">({item.error})</span>
+                        {/* Thumbnail / Source Avatar */}
+                        <div className="w-14 h-10 rounded-lg overflow-hidden bg-black/50 flex-shrink-0 border border-[#26354c] relative">
+                          {item.thumbnail ? (
+                            <img src={item.thumbnail} alt="" className="w-full h-full object-cover" />
+                          ) : (
+                            <div className="w-full h-full flex items-center justify-center text-[10px] text-slate-400 font-bold uppercase">
+                              {item.source}
+                            </div>
+                          )}
+                          {item.duration ? (
+                            <span className="absolute bottom-0.5 right-0.5 px-1 py-0.2 rounded bg-black/80 text-[9px] text-white font-mono">
+                              {Math.round(item.duration)}s
+                            </span>
+                          ) : null}
+                        </div>
+
+                        {/* Title and Status Details */}
+                        <div className="flex-1 min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <p className="text-xs font-semibold text-white truncate max-w-md" title={item.title}>
+                              {item.title}
+                            </p>
+
+                            {/* Status badges */}
+                            {item.analysis_status === "SOURCE_ACCESS_CHALLENGE" && (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-500/10 border border-amber-500/30 text-amber-300 text-[10px] font-semibold">
+                                <Lock size={10} /> Access Challenge Required
+                              </span>
+                            )}
+                            {item.analysis_status === "RATE_LIMITED" && (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-500/10 border border-amber-500/30 text-amber-300 text-[10px] font-semibold">
+                                <Clock size={10} /> Rate Limited
+                              </span>
+                            )}
+                            {item.analysis_status === "MEDIA_UNAVAILABLE" && (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-red-500/10 border border-red-500/30 text-red-300 text-[10px] font-semibold">
+                                <AlertCircle size={10} /> Unavailable
+                              </span>
+                            )}
+                            {item.analysis_status === "NETWORK_TIMEOUT" && (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-orange-500/10 border border-orange-500/30 text-orange-300 text-[10px] font-semibold">
+                                <WifiOff size={10} /> Network Timeout
+                              </span>
+                            )}
+                            {isItemValid && (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-[10px] font-semibold">
+                                <CheckCircle2 size={10} /> Ready
+                              </span>
+                            )}
+                          </div>
+
+                          {/* Friendly user explanation */}
+                          <div className="mt-1 text-[11px] text-slate-400">
+                            {item.user_message ? (
+                              <p className={isChallenge ? "text-amber-300/80" : "text-slate-400"}>
+                                {item.user_message}
+                              </p>
+                            ) : (
+                              <div className="flex items-center gap-2">
+                                <span className="capitalize text-slate-300">{item.source}</span>
+                                {item.creator && <span>• {item.creator}</span>}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Right action controls */}
+                      <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+                        {isItemValid ? (
+                          <>
+                            <Select
+                              value={item.targetQuality || "original"}
+                              onChange={(val) => {
+                                setMediaItems((prev) =>
+                                  prev.map((it, i) => (i === originalIndex ? { ...it, targetQuality: val } : it))
+                                );
+                              }}
+                              options={qualityOptions}
+                              size="sm"
+                            />
+
+                            <Select
+                              value={item.targetFormat || "mp4"}
+                              onChange={(val) => {
+                                setMediaItems((prev) =>
+                                  prev.map((it, i) => (i === originalIndex ? { ...it, targetFormat: val } : it))
+                                );
+                              }}
+                              options={formatOptions}
+                              size="sm"
+                            />
+                          </>
+                        ) : (
+                          <div className="flex items-center gap-2">
+                            <a
+                              href={item.url}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-[#111a2b] border border-[#26354c] hover:bg-[#172338] text-[11px] text-blue-300 font-medium transition-colors"
+                              title="Open original link in browser"
+                            >
+                              <span>Open</span>
+                              <ExternalLink size={12} />
+                            </a>
+
+                            {item.raw_error && (
+                              <button
+                                onClick={() => toggleErrorDisclosure(item.url)}
+                                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-[#111a2b] border border-[#26354c] hover:bg-[#172338] text-[11px] text-slate-400 hover:text-slate-200 font-medium transition-colors cursor-pointer"
+                              >
+                                <span>Details</span>
+                                {expandedErrors[item.url] ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                              </button>
+                            )}
+                          </div>
                         )}
                       </div>
                     </div>
+
+                    {/* Expandable Technical Traceback (Safe Disclosure) */}
+                    {expandedErrors[item.url] && item.raw_error && (
+                      <div className="mt-3 p-3 rounded-lg bg-[#080d17] border border-[#26354c] text-[11px] font-mono text-slate-400 space-y-1 overflow-x-auto">
+                        <div className="text-[10px] text-slate-500 font-bold uppercase">
+                          Technical Diagnostic Details:
+                        </div>
+                        <pre className="whitespace-pre-wrap break-all text-slate-300 text-[10px]">
+                          {item.raw_error}
+                        </pre>
+                      </div>
+                    )}
                   </div>
-
-                  {/* Per-Item Overrides */}
-                  {item.is_valid && (
-                    <div className="flex items-center gap-2">
-                      <Select
-                        value={item.targetQuality || "original"}
-                        onChange={(val) => {
-                          setMediaItems((prev) =>
-                            prev.map((it, i) => (i === idx ? { ...it, targetQuality: val } : it))
-                          );
-                        }}
-                        options={qualityOptions}
-                        size="sm"
-                      />
-
-                      <Select
-                        value={item.targetFormat || "mp4"}
-                        onChange={(val) => {
-                          setMediaItems((prev) =>
-                            prev.map((it, i) => (i === idx ? { ...it, targetFormat: val } : it))
-                          );
-                        }}
-                        options={formatOptions}
-                        size="sm"
-                      />
-                    </div>
-                  )}
-                </div>
-              );
-            })}
+                );
+              })
+            )}
           </div>
 
           {/* Download Action Footer */}
           <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-4 border-t border-[#1e293b]">
             <span className="text-xs text-slate-400">
-              Ready to process {selectedItems.length} items with {concurrency} parallel workers.
+              {eligibleCount > 0
+                ? `Ready to process ${selectedCount} of ${eligibleCount} eligible items with ${concurrency} parallel workers.`
+                : `0 items ready for download • ${mediaItems.length} items safely preserved in collection.`}
             </span>
 
             <button
               onClick={handleStartDownload}
-              disabled={submitting || selectedItems.length === 0}
-              className="flex items-center justify-center gap-2 px-8 py-3 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white text-sm font-bold shadow-xl shadow-blue-900/40 transition-all w-full sm:w-auto cursor-pointer"
+              disabled={submitting || selectedCount === 0}
+              className={`flex items-center justify-center gap-2 px-8 py-3 rounded-xl text-white text-sm font-bold shadow-xl transition-all w-full sm:w-auto ${
+                selectedCount > 0
+                  ? "bg-blue-600 hover:bg-blue-500 shadow-blue-900/40 cursor-pointer"
+                  : "bg-slate-800 text-slate-500 border border-slate-700/50 cursor-not-allowed opacity-60"
+              }`}
             >
               {submitting ? (
                 <>
                   <Sparkles size={16} className="animate-spin" /> Queuing Batch...
                 </>
-              ) : (
+              ) : selectedCount > 0 ? (
                 <>
-                  <span>Download All ({selectedItems.length})</span> <ArrowRight size={16} />
+                  <span>Download All ({selectedCount})</span> <ArrowRight size={16} />
                 </>
+              ) : (
+                <span>No Eligible Items to Download</span>
               )}
             </button>
           </div>

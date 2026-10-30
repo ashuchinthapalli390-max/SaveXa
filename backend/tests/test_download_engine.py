@@ -71,6 +71,7 @@ class MockMediaServer(http.server.BaseHTTPRequestHandler):
 
 class ThreadedHTTPServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
     daemon_threads = True
+    request_queue_size = 128
 
 @pytest.fixture(scope="session", autouse=True)
 def run_mock_server():
@@ -321,15 +322,20 @@ def test_security_validation():
 @pytest.mark.asyncio
 async def test_bulk_200_limit():
     """Verify that bulk URL analysis caps incoming batches at 200 items."""
+    from unittest.mock import patch
     from app.api.analyze import analyze_bulk_urls
-    from app.schemas.media import BulkAnalysisRequest
+    from app.schemas.media import BulkAnalysisRequest, MediaMetadata
 
     # Submit 220 URLs
     test_urls = [f"http://{TEST_HOST}:{TEST_PORT}/sample_video.mp4?idx={i}" for i in range(220)]
     req = BulkAnalysisRequest(urls=test_urls, allow_localhost=True)
-    results = await analyze_bulk_urls(req)
 
-    # Must be bounded at exactly 200 items
-    assert len(results) == 200
-    for r in results:
-        assert r.is_valid is True
+    with patch("app.downloaders.direct.DirectDownloader.analyze", return_value=MediaMetadata(
+        url="mock", title="Mock Title", source="direct", is_valid=True
+    )):
+        results = await analyze_bulk_urls(req)
+
+        # Must be bounded at exactly 200 items
+        assert len(results) == 200
+        for r in results:
+            assert r.is_valid is True

@@ -1,6 +1,16 @@
 import datetime
+from enum import Enum
 from typing import Optional, List, Any, Dict
 from pydantic import BaseModel, Field, ConfigDict
+
+class AnalysisStatus(str, Enum):
+    AVAILABLE = "AVAILABLE"
+    SOURCE_ACCESS_CHALLENGE = "SOURCE_ACCESS_CHALLENGE"
+    MEDIA_UNAVAILABLE = "MEDIA_UNAVAILABLE"
+    RATE_LIMITED = "RATE_LIMITED"
+    UNSUPPORTED = "UNSUPPORTED"
+    NETWORK_TIMEOUT = "NETWORK_TIMEOUT"
+    FAILED = "FAILED"
 
 class FormatOption(BaseModel):
     format_id: str
@@ -30,6 +40,14 @@ class MediaMetadata(BaseModel):
     formats: List[FormatOption] = Field(default_factory=list)
     is_valid: bool = True
     error: Optional[str] = None
+
+    # Normalized error classification and resilience fields
+    analysis_status: AnalysisStatus = AnalysisStatus.AVAILABLE
+    error_code: Optional[str] = None
+    user_message: Optional[str] = None
+    suggested_action: Optional[str] = None
+    is_selectable: bool = True
+    raw_error: Optional[str] = None
 
 class UrlAnalysisRequest(BaseModel):
     url: str
@@ -151,6 +169,23 @@ class SystemStatusResponse(BaseModel):
     default_destination: str
     storage_free_bytes: int
     storage_total_bytes: int
+
+class ExtractorHealthResponse(BaseModel):
+    ytdlp_version: str
+    ytdlp_operational: bool
+    js_runtime_configured: str
+    node_detected: bool
+    node_version: Optional[str] = None
+    node_path: Optional[str] = None
+    deno_detected: bool
+    deno_version: Optional[str] = None
+    ffmpeg_detected: bool
+    ffmpeg_version: Optional[str] = None
+    detected_browsers: List[str] = Field(default_factory=list)
+    cookies_file_present: bool = False
+    cookies_file_path: Optional[str] = None
+    recent_access_challenges: int = 0
+    notes: List[str] = Field(default_factory=list)
 
 class SettingsUpdateRequest(BaseModel):
     default_destination: Optional[str] = None

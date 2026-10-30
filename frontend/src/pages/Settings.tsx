@@ -10,9 +10,15 @@ import {
   Check,
   Zap,
   Gauge,
+  ShieldCheck,
+  Activity,
+  Terminal,
+  RefreshCw,
+  Cookie,
+  Code2,
 } from "lucide-react";
 import { api } from "../services/api";
-import { AppSettings, SystemStatus, PerformanceSettings } from "../types";
+import { AppSettings, SystemStatus, PerformanceSettings, ExtractorHealth } from "../types";
 import { Slider } from "../components/ui/Slider";
 import { Switch } from "../components/ui/Switch";
 import { Checkbox } from "../components/ui/Checkbox";
@@ -21,6 +27,9 @@ export const Settings: React.FC = () => {
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [systemStatus, setSystemStatus] = useState<SystemStatus | null>(null);
   const [perfSettings, setPerfSettings] = useState<PerformanceSettings | null>(null);
+  const [extractorHealth, setExtractorHealth] = useState<ExtractorHealth | null>(null);
+  const [testResult, setTestResult] = useState<any | null>(null);
+  const [testingDiagnostics, setTestingDiagnostics] = useState(false);
 
   const [destinationInput, setDestinationInput] = useState("");
   const [concurrency, setConcurrency] = useState(10);
@@ -36,10 +45,11 @@ export const Settings: React.FC = () => {
 
   const loadData = async () => {
     try {
-      const [sData, statData, pData] = await Promise.allSettled([
+      const [sData, statData, pData, healthData] = await Promise.allSettled([
         api.getSettings(),
         api.getStatus(),
         api.getPerformanceSettings(),
+        api.getExtractorHealth(),
       ]);
 
       if (sData.status === "fulfilled") {
@@ -58,8 +68,28 @@ export const Settings: React.FC = () => {
         setPerfMode(pData.value.mode);
         setPerHostLimit(pData.value.per_host_limit);
       }
+      if (healthData.status === "fulfilled") {
+        setExtractorHealth(healthData.value);
+      }
     } catch {
       // Ignore
+    }
+  };
+
+  const handleRunDiagnostics = async () => {
+    setTestingDiagnostics(true);
+    setTestResult(null);
+    try {
+      const [health, test] = await Promise.all([
+        api.getExtractorHealth(),
+        api.testExtractor(),
+      ]);
+      setExtractorHealth(health);
+      setTestResult(test);
+    } catch (e: any) {
+      setTestResult({ error: e.message || "Diagnostics failed" });
+    } finally {
+      setTestingDiagnostics(false);
     }
   };
 
@@ -283,6 +313,127 @@ export const Settings: React.FC = () => {
           <span className="px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-semibold">
             {systemStatus?.ffmpeg_installed ? "Ready" : "Detected"}
           </span>
+        </div>
+      </div>
+
+      {/* Source Compatibility Diagnostics Panel */}
+      <div className="rounded-2xl p-6 border border-[#1e293b] bg-[#0b1220] shadow-lg space-y-4">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-[#1e293b] pb-4">
+          <div>
+            <h3 className="text-sm font-bold text-white flex items-center gap-2">
+              <ShieldCheck size={16} className="text-blue-400" /> Source Compatibility Diagnostics
+            </h3>
+            <p className="text-xs text-slate-400 mt-0.5">
+              Real-time inspection of yt-dlp extractor, external JavaScript runtimes, cookies, and network health.
+            </p>
+          </div>
+
+          <button
+            onClick={handleRunDiagnostics}
+            disabled={testingDiagnostics}
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-xs font-bold transition-all shadow-md shadow-blue-950/30 cursor-pointer"
+          >
+            <RefreshCw size={13} className={testingDiagnostics ? "animate-spin" : ""} />
+            <span>{testingDiagnostics ? "Testing..." : "Run Diagnostics Check"}</span>
+          </button>
+        </div>
+
+        {/* Runtime Diagnostics Cards */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="p-3.5 rounded-xl bg-[#111a2b] border border-[#26354c] space-y-1">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] text-slate-400 uppercase font-semibold">yt-dlp Extractor</span>
+              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                Active
+              </span>
+            </div>
+            <p className="text-xs font-mono font-bold text-white">v{extractorHealth?.ytdlp_version || "2026.10.26"}</p>
+            <p className="text-[10px] text-slate-500">Universal web extractor</p>
+          </div>
+
+          <div className="p-3.5 rounded-xl bg-[#111a2b] border border-[#26354c] space-y-1">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] text-slate-400 uppercase font-semibold">JS Runtime (EJS)</span>
+              <span
+                className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                  extractorHealth?.node_detected || extractorHealth?.deno_detected
+                    ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                    : "bg-amber-500/10 text-amber-400 border border-amber-500/20"
+                }`}
+              >
+                {extractorHealth?.node_detected ? "Node.js (Active)" : extractorHealth?.deno_detected ? "Deno (Active)" : "Missing"}
+              </span>
+            </div>
+            <p className="text-xs font-mono font-bold text-white">
+              {extractorHealth?.node_version || extractorHealth?.deno_version || "None"}
+            </p>
+            <p className="text-[10px] text-slate-500 truncate" title={extractorHealth?.node_path || ""}>
+              {extractorHealth?.node_path ? "Path verified" : "Required for modern JS extraction"}
+            </p>
+          </div>
+
+          <div className="p-3.5 rounded-xl bg-[#111a2b] border border-[#26354c] space-y-1">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] text-slate-400 uppercase font-semibold">Cookies Session</span>
+              <span
+                className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                  extractorHealth?.cookies_file_present
+                    ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                    : "bg-slate-700/50 text-slate-400 border border-slate-600/30"
+                }`}
+              >
+                {extractorHealth?.cookies_file_present ? "Loaded" : "Not Provided"}
+              </span>
+            </div>
+            <p className="text-xs font-mono font-bold text-white">
+              {extractorHealth?.cookies_file_present ? "cookies.txt active" : "Anonymous Mode"}
+            </p>
+            <p className="text-[10px] text-slate-500">
+              {extractorHealth?.detected_browsers.length
+                ? `Browsers: ${extractorHealth.detected_browsers.join(", ")}`
+                : "No browsers detected"}
+            </p>
+          </div>
+        </div>
+
+        {/* Live Test Results banner */}
+        {testResult && (
+          <div className="p-3.5 rounded-xl bg-[#111a2b] border border-[#26354c] space-y-2 text-xs">
+            <div className="flex items-center justify-between">
+              <span className="font-bold text-white flex items-center gap-1.5">
+                <Activity size={13} className="text-blue-400" />
+                Live Extractor Reachability Test
+              </span>
+              <span className="text-[11px] font-mono text-slate-400">
+                Latency: {testResult.latency_ms}ms
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-slate-400">Status:</span>
+              <span
+                className={`font-semibold ${
+                  testResult.is_valid ? "text-emerald-400" : "text-amber-400"
+                }`}
+              >
+                {testResult.status} {testResult.error_code ? `(${testResult.error_code})` : ""}
+              </span>
+            </div>
+            {testResult.user_message && (
+              <p className="text-[11px] text-slate-300 bg-[#080d17] p-2 rounded border border-[#1e293b]">
+                {testResult.user_message}
+              </p>
+            )}
+          </div>
+        )}
+
+        {/* Diagnostic Notes */}
+        <div className="space-y-1.5 text-xs text-slate-400 pt-1">
+          <p className="font-semibold text-slate-300">System Architecture Notes:</p>
+          <ul className="space-y-1 pl-4 list-disc text-[11px] text-slate-400">
+            {extractorHealth?.notes.map((note, idx) => (
+              <li key={idx}>{note}</li>
+            ))}
+          </ul>
         </div>
       </div>
 

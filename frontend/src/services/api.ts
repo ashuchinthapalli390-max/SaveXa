@@ -1,4 +1,4 @@
-import { MediaMetadata, Job, Batch, SystemStatus, HistoryItem, LibraryItem, AppSettings, ImageItem, PerformanceSettings, PerformanceStatus } from "../types";
+import { MediaMetadata, Job, Batch, SystemStatus, HistoryItem, LibraryItem, AppSettings, ImageItem, PerformanceSettings, PerformanceStatus, ExtractorHealth } from "../types";
 
 const API_BASE = "/api";
 
@@ -34,6 +34,15 @@ export const api = {
     method: "POST",
     body: JSON.stringify({ path }),
   }),
+  getExtractorHealth: () => request<ExtractorHealth>("/system/extractor-health"),
+  testExtractor: (url?: string) =>
+    request<{ url: string; status: string; is_valid: boolean; title: string; error_code?: string; user_message?: string; latency_ms: number }>(
+      "/system/extractor-test",
+      {
+        method: "POST",
+        body: JSON.stringify({ url }),
+      }
+    ),
 
   // Analysis
   analyzeUrl: (url: string, allowLocalhost: boolean = false) =>

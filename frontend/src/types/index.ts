@@ -1,3 +1,12 @@
+export type AnalysisStatus =
+  | "AVAILABLE"
+  | "SOURCE_ACCESS_CHALLENGE"
+  | "MEDIA_UNAVAILABLE"
+  | "RATE_LIMITED"
+  | "UNSUPPORTED"
+  | "NETWORK_TIMEOUT"
+  | "FAILED";
+
 export interface FormatOption {
   format_id: string;
   ext: string;
@@ -27,6 +36,13 @@ export interface MediaMetadata {
   formats: FormatOption[];
   is_valid: boolean;
   error?: string;
+  // Normalized analysis & resilience fields
+  analysis_status?: AnalysisStatus;
+  error_code?: string;
+  user_message?: string;
+  suggested_action?: string;
+  is_selectable?: boolean;
+  raw_error?: string;
   // UI selection states
   selected?: boolean;
   targetQuality?: string;
@@ -107,6 +123,24 @@ export interface SystemStatus {
   default_destination: string;
   storage_free_bytes: number;
   storage_total_bytes: number;
+}
+
+export interface ExtractorHealth {
+  ytdlp_version: string;
+  ytdlp_operational: boolean;
+  js_runtime_configured: string;
+  node_detected: boolean;
+  node_version?: string;
+  node_path?: string;
+  deno_detected: boolean;
+  deno_version?: string;
+  ffmpeg_detected: boolean;
+  ffmpeg_version?: string;
+  detected_browsers: string[];
+  cookies_file_present: boolean;
+  cookies_file_path?: string;
+  recent_access_challenges: number;
+  notes: string[];
 }
 
 export interface HistoryItem {

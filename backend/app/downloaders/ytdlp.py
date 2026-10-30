@@ -1,14 +1,106 @@
 import asyncio
 import os
 import re
+import shutil
 from pathlib import Path
 from typing import Callable, Any, Optional
+from urllib.parse import urlparse
 import yt_dlp
 
 from app.core.config import settings
 from app.downloaders.base import BaseDownloader
-from app.schemas.media import MediaMetadata, FormatOption
+from app.schemas.media import MediaMetadata, FormatOption, AnalysisStatus
 from app.utils.security import sanitize_filename
+
+def extract_fallback_title(url: str) -> tuple[str, str]:
+    """Extract a friendly fallback title and source from URL."""
+    yt_match = re.search(r'(?:v=|\/embed\/|\/watch\?v=|\/v\/|youtu\.be\/|\/shorts\/)([a-zA-Z0-9_-]{11})', url)
+    if yt_match:
+        return f"YouTube Video ({yt_match.group(1)})", "youtube"
+    
+    try:
+        parsed = urlparse(url)
+        domain = parsed.netloc.replace("www.", "")
+        path_name = Path(parsed.path).name
+        src = domain.split(".")[0] if "." in domain else domain
+        if path_name:
+            return f"{domain}: {path_name[:32]}", src
+        return f"{domain} Media", src
+    except Exception:
+        return "Preserved Media Item", "web"
+
+def classify_ytdlp_error(url: str, err: Exception) -> tuple[AnalysisStatus, str, str, str]:
+    """
+    Classify yt-dlp exceptions into normalized status, error_code, user_message, and suggested_action.
+    Never exposes raw unhandled Python tracebacks directly in the primary user message.
+    """
+    err_str = str(err)
+    lower_err = err_str.lower()
+    
+    if any(k in lower_err for k in ["confirm you're not a bot", "confirm youre not a bot", "bot", "captcha", "sign in to confirm"]):
+        return (
+            AnalysisStatus.SOURCE_ACCESS_CHALLENGE,
+            "SOURCE_ACCESS_CHALLENGE",
+            "YouTube anti-bot verification required. Automated requests from this network require interactive sign-in or session cookies.",
+            "Link preserved. You can open directly in your browser, or configure cookies.txt in the data folder."
+        )
+    if any(k in lower_err for k in ["429", "too many requests", "rate limit", "temporarily blocked"]):
+        return (
+            AnalysisStatus.RATE_LIMITED,
+            "RATE_LIMITED",
+            "Source provider temporarily rate-limited automated queries (HTTP 429). Requests paused to protect network connection.",
+            "Link preserved. Wait a few moments before retrying this source."
+        )
+    if any(k in lower_err for k in ["georestricted", "not available in your country", "blocked in your region", "country"]):
+        return (
+            AnalysisStatus.MEDIA_UNAVAILABLE,
+            "GEO_RESTRICTED",
+            "This media is restricted in your geographic region.",
+            "Media cannot be accessed from your current location."
+        )
+    if any(k in lower_err for k in ["private video", "this video is private", "members-only", "requires a subscription", "login required"]):
+        return (
+            AnalysisStatus.MEDIA_UNAVAILABLE,
+            "MEDIA_PRIVATE",
+            "This media is private, members-only, or requires authorization to view.",
+            "Verify visibility permissions or sign-in credentials."
+        )
+    if any(k in lower_err for k in ["premieres in", "live event will begin", "live stream"]):
+        return (
+            AnalysisStatus.MEDIA_UNAVAILABLE,
+            "UPCOMING_BROADCAST",
+            "This live stream or premiere broadcast has not started yet.",
+            "Retry after the broadcast has started."
+        )
+    if any(k in lower_err for k in ["video unavailable", "removed by the uploader", "account associated with this video has been terminated", "not available"]):
+        return (
+            AnalysisStatus.MEDIA_UNAVAILABLE,
+            "MEDIA_UNAVAILABLE",
+            "This video is unavailable or has been removed from the platform.",
+            "Verify the source link is still active."
+        )
+    if any(k in lower_err for k in ["timed out", "timeout", "connection reset", "readtimeout", "connecttimeout"]):
+        return (
+            AnalysisStatus.NETWORK_TIMEOUT,
+            "NETWORK_TIMEOUT",
+            "Connection to the media host timed out.",
+            "Check internet connection and try again."
+        )
+    if any(k in lower_err for k in ["unsupported url", "is not a valid url", "no suitable extractor"]):
+        return (
+            AnalysisStatus.UNSUPPORTED,
+            "UNSUPPORTED_HOST",
+            "This URL or hosting service is not recognized as a supported media source.",
+            "Ensure the link points directly to a supported media platform or file."
+        )
+
+    # General extractor error
+    return (
+        AnalysisStatus.FAILED,
+        "EXTRACTOR_ERROR",
+        "Unable to extract media metadata from this link.",
+        "Check technical details or verify the source link."
+    )
 
 class YtDlpDownloader(BaseDownloader):
     """Downloader for platforms supported by yt-dlp (YouTube, Vimeo, SoundCloud, Kick, etc.)."""
@@ -33,6 +125,20 @@ class YtDlpDownloader(BaseDownloader):
                 }
             }
         }
+
+        # Configure external JavaScript runtime (Node.js or Deno)
+        node_path = shutil.which("node")
+        deno_path = shutil.which("deno")
+        if node_path:
+            opts["js_runtimes"] = {"node": {"path": node_path}}
+        elif deno_path:
+            opts["js_runtimes"] = {"deno": {"path": deno_path}}
+
+        # Check for cookies file in data directory
+        cookie_file = settings.DATA_DIR / "cookies.txt"
+        if cookie_file.is_file() and cookie_file.stat().st_size > 0:
+            opts["cookiefile"] = str(cookie_file)
+
         if settings.FFMPEG_PATH and os.path.exists(settings.FFMPEG_PATH):
             opts["ffmpeg_location"] = settings.FFMPEG_PATH
         return opts
@@ -152,15 +258,25 @@ class YtDlpDownloader(BaseDownloader):
                     is_playlist=False,
                     available_qualities=sorted_qualities,
                     formats=format_options,
-                    is_valid=True
+                    is_valid=True,
+                    analysis_status=AnalysisStatus.AVAILABLE,
+                    is_selectable=True,
                 )
         except Exception as e:
+            status, code, user_msg, action = classify_ytdlp_error(url, e)
+            fallback_title, detected_source = extract_fallback_title(url)
             return MediaMetadata(
                 url=url,
-                title="Unavailable Media",
-                source="unknown",
+                title=fallback_title,
+                source=detected_source,
                 is_valid=False,
-                error=f"Extractor error: {str(e)}"
+                analysis_status=status,
+                error_code=code,
+                user_message=user_msg,
+                suggested_action=action,
+                is_selectable=False,
+                raw_error=str(e),
+                error=user_msg,
             )
 
     async def download(
