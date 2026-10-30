@@ -131,10 +131,18 @@ class ExtractorHealthService:
         if ffmpeg_ok:
             notes.append(f"FFmpeg ({ffmpeg_ver}) active for audio/video stream remuxing.")
 
-        if cookies_present:
+        # Check local authentication status
+        from app.services.auth_service import auth_service
+        auth_stat = auth_service.get_status()
+
+        if auth_stat.is_connected:
+            notes.append(f"Local browser authentication: Active ({auth_stat.selected_browser}).")
+            if auth_stat.browser_lock_detected:
+                notes.append(f"Warning: {auth_stat.lock_reason}")
+        elif auth_stat.auth_mode == "cookies_file" or cookies_present:
             notes.append(f"Custom cookies file loaded from {cookies_file.name} for authenticated sources.")
         else:
-            notes.append("No cookies.txt file detected in data/. Add data/cookies.txt if automated requests trigger bot challenges.")
+            notes.append("Local authentication: Anonymous (no browser session or cookies loaded).")
 
         notes.append("Bulk analysis uses polite sequential pacing with automated circuit breaker to prevent IP rate limits.")
 
@@ -155,6 +163,11 @@ class ExtractorHealthService:
             detected_browsers=detected_browsers,
             cookies_file_present=cookies_present,
             cookies_file_path=str(cookies_file) if cookies_present else None,
+            auth_mode=auth_stat.auth_mode,
+            browser_auth_enabled=auth_stat.is_connected,
+            browser_auth_approved=auth_stat.user_approved,
+            selected_browser=auth_stat.selected_browser,
+            browser_lock_detected=auth_stat.browser_lock_detected,
             recent_access_challenges=0,
             notes=notes,
         )

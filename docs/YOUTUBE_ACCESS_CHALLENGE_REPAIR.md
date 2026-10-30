@@ -185,3 +185,4 @@ dist/assets/index-B4tIFSzn.js   613.48 kB │ gzip: 188.38 kB
    ```
 3. **Verify Settings**:
    Navigate to `http://localhost:3000/settings` and observe that all 4 diagnostic cards display active and operational status.
+

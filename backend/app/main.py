@@ -4,7 +4,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select
 
-from app.api import system, analyze, downloads, batches, history, settings as app_settings, media_library, images, performance
+from app.api import system, analyze, downloads, batches, history, settings as app_settings, media_library, images, performance, auth
 from app.core.config import settings
 from app.database.connection import init_db, AsyncSessionLocal
 from app.models.entities import DownloadJob
@@ -46,6 +46,7 @@ app.include_router(app_settings.router, prefix=settings.API_PREFIX)
 app.include_router(media_library.router, prefix=settings.API_PREFIX)
 app.include_router(images.router, prefix=settings.API_PREFIX)
 app.include_router(performance.router, prefix=settings.API_PREFIX)
+app.include_router(auth.router, prefix=settings.API_PREFIX)
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):

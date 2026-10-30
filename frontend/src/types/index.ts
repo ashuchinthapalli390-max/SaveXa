@@ -142,8 +142,30 @@ export interface ExtractorHealth {
   detected_browsers: string[];
   cookies_file_present: boolean;
   cookies_file_path?: string;
+  auth_mode?: string;
+  browser_auth_enabled?: boolean;
+  browser_auth_approved?: boolean;
+  selected_browser?: string | null;
+  browser_lock_detected?: boolean;
   recent_access_challenges: number;
   notes: string[];
+}
+
+export interface AuthStatus {
+  auth_mode: string;
+  selected_browser?: string | null;
+  user_approved: boolean;
+  is_connected: boolean;
+  browser_lock_detected: boolean;
+  lock_reason?: string | null;
+  diagnostic_message?: string | null;
+  disclaimer: string;
+}
+
+export interface ConnectBrowserRequest {
+  browser: string;
+  user_approved: boolean;
+  acknowledge_disclaimer: boolean;
 }
 
 export interface HistoryItem {

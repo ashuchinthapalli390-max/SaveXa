@@ -37,6 +37,14 @@ def classify_ytdlp_error(url: str, err: Exception) -> tuple[AnalysisStatus, str,
     err_str = str(err)
     lower_err = err_str.lower()
     
+    if any(k in lower_err for k in ["could not copy chrome cookie database", "could not copy", "cookie database"]):
+        return (
+            AnalysisStatus.SOURCE_ACCESS_CHALLENGE,
+            "BROWSER_COOKIE_LOCKED",
+            "Google Chrome is actively running and locking its cookie session on Windows.",
+            "Close Google Chrome briefly to allow yt-dlp to access the session, or export cookies to data/cookies.txt."
+        )
+
     if any(k in lower_err for k in ["confirm you're not a bot", "confirm youre not a bot", "bot", "captcha", "sign in to confirm"]):
         return (
             AnalysisStatus.SOURCE_ACCESS_CHALLENGE,
@@ -148,10 +156,10 @@ class YtDlpDownloader(BaseDownloader):
         if runtimes:
             opts["js_runtimes"] = runtimes
 
-        # Check for cookies file in data directory
-        cookie_file = settings.DATA_DIR / "cookies.txt"
-        if cookie_file.is_file() and cookie_file.stat().st_size > 0:
-            opts["cookiefile"] = str(cookie_file)
+        # Check local source authentication (browser session or cookies.txt)
+        from app.services.auth_service import auth_service
+        auth_opts = auth_service.get_ytdlp_auth_opts()
+        opts.update(auth_opts)
 
         if settings.FFMPEG_PATH and os.path.exists(settings.FFMPEG_PATH):
             opts["ffmpeg_location"] = settings.FFMPEG_PATH

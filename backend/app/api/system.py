@@ -15,6 +15,7 @@ from app.queue.worker_pool import worker_pool
 from app.schemas.media import SystemStatusResponse, ExtractorHealthResponse
 from app.services.ffmpeg_service import ffmpeg_service
 from app.services.extractor_health import extractor_health_service
+from app.services.extractor_health import extractor_health_service
 
 router = APIRouter(prefix="/system", tags=["System"])
 
@@ -121,6 +122,19 @@ async def open_file(req: OpenPathRequest):
 async def get_extractor_health():
     """Returns deep diagnostics on yt-dlp environment, JS runtime, cookies, and extractors."""
     return extractor_health_service.get_health()
+@router.get("/extractor-health", response_model=ExtractorHealthResponse)
+async def get_extractor_health():
+    """Returns deep diagnostics on yt-dlp environment, JS runtime, cookies, and extractors."""
+    return extractor_health_service.get_health()
+
+class ExtractorTestRequest(BaseModel):
+    url: Optional[str] = None
+
+@router.post("/extractor-test")
+async def test_extractor(req: ExtractorTestRequest):
+    """Test extractor connectivity on a public sample."""
+    return await extractor_health_service.test_extractor(req.url)
+
 
 class ExtractorTestRequest(BaseModel):
     url: Optional[str] = None

@@ -58,3 +58,12 @@ frontend/dist-ssr/
 .coverage
 htmlcov/
 
+# Local Authentication & Session Secrets (Never commit credentials)
+*.cookies
+*.cookie
+*cookies.txt
+data/cookies*
+data/auth_config.json
+data/*.cookies
+*.session*
+

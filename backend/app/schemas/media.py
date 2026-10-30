@@ -187,8 +187,32 @@ class ExtractorHealthResponse(BaseModel):
     detected_browsers: List[str] = Field(default_factory=list)
     cookies_file_present: bool = False
     cookies_file_path: Optional[str] = None
+    auth_mode: str = "none"
+    browser_auth_enabled: bool = False
+    browser_auth_approved: bool = False
+    selected_browser: Optional[str] = None
+    browser_lock_detected: bool = False
     recent_access_challenges: int = 0
     notes: List[str] = Field(default_factory=list)
+
+class ConnectBrowserRequest(BaseModel):
+    browser: str = "chrome"
+    user_approved: bool = False
+    acknowledge_disclaimer: bool = False
+
+class AuthStatusResponse(BaseModel):
+    auth_mode: str = "none"
+    selected_browser: Optional[str] = None
+    user_approved: bool = False
+    is_connected: bool = False
+    browser_lock_detected: bool = False
+    lock_reason: Optional[str] = None
+    diagnostic_message: Optional[str] = None
+    disclaimer: str = (
+        "Authentication uses local browser session data strictly on this machine. "
+        "Credentials are never transmitted, logged, or exported. "
+        "Authentication cannot bypass DRM, copyright restrictions, or private memberships without access."
+    )
 
 class SettingsUpdateRequest(BaseModel):
     default_destination: Optional[str] = None

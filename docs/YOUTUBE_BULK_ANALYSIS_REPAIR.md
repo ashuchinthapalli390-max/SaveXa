@@ -138,3 +138,4 @@ When YouTube rate-limits automated requests on a network:
    - Save your YouTube session cookies in Netscape format to `SaveXa/backend/data/cookies.txt`.
    - SaveXa will automatically load them for authenticated extraction without bot challenges.
 4. **Diagnostics**: Open **Settings -> Source Compatibility Diagnostics** and click **"Run Diagnostics Check"** to monitor extractor health.
+

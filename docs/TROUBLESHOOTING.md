@@ -103,3 +103,25 @@ SaveXa defaults to:
 
 - You can configure custom download folders (including subfolders such as `SaveXa\trailers`) in **Settings** or on the **Bulk Downloader** page.
 - Always ensure the destination path is writable and not on a read-only network share.
+
+---
+
+## 6. Local Optional Source Authentication (Chrome Browser Session)
+
+### Overview
+SaveXa supports local browser session extraction using supported yt-dlp `--cookies-from-browser` options for Google Chrome.
+- **Strict Privacy**: Credentials and cookies remain 100% on your local machine and are never transmitted, logged, or exported.
+- **Explicit User Approval**: The browser session is never accessed unless you explicitly approve it in **Settings**.
+- **Source Restriction Disclaimer**: Authentication uses local account cookies and cannot bypass DRM, copyright take-downs, or private memberships without access.
+
+### Windows SQLite Database Lock (`BROWSER_COOKIE_LOCKED`)
+When Google Chrome is actively running on Windows, it holds an exclusive process lock on its SQLite cookie database (`Network\Cookies`). yt-dlp will report `BROWSER_COOKIE_LOCKED`:
+> *Google Chrome is actively running and locking its cookie session on Windows.*
+
+**Recommended Workarounds**:
+1. **Option A (Quickest)**: Close Google Chrome temporarily before resuming the download queue.
+2. **Option B (Recommended for active browsing)**: Export cookies to `backend/data/cookies.txt` using a browser extension like *Get cookies.txt LOCALLY*. SaveXa automatically reads `cookies.txt` with zero file locking conflicts.
+
+### Disconnecting
+To return to anonymous mode at any time, navigate to **Settings** and click **"Disconnect Session (Revert to Anonymous)"**.
+

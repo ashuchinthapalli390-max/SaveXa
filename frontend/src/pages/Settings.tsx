@@ -16,9 +16,12 @@ import {
   RefreshCw,
   Cookie,
   Code2,
+  Lock,
+  Unlock,
+  Key,
 } from "lucide-react";
 import { api } from "../services/api";
-import { AppSettings, SystemStatus, PerformanceSettings, ExtractorHealth } from "../types";
+import { AppSettings, SystemStatus, PerformanceSettings, ExtractorHealth, AuthStatus } from "../types";
 import { Slider } from "../components/ui/Slider";
 import { Switch } from "../components/ui/Switch";
 import { Checkbox } from "../components/ui/Checkbox";
@@ -28,6 +31,11 @@ export const Settings: React.FC = () => {
   const [systemStatus, setSystemStatus] = useState<SystemStatus | null>(null);
   const [perfSettings, setPerfSettings] = useState<PerformanceSettings | null>(null);
   const [extractorHealth, setExtractorHealth] = useState<ExtractorHealth | null>(null);
+  const [authStatus, setAuthStatus] = useState<AuthStatus | null>(null);
+  const [connectingAuth, setConnectingAuth] = useState(false);
+  const [authApproved, setAuthApproved] = useState(false);
+  const [authDisclaimerAccepted, setAuthDisclaimerAccepted] = useState(false);
+  const [authActionMessage, setAuthActionMessage] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<any | null>(null);
   const [testingDiagnostics, setTestingDiagnostics] = useState(false);
 
@@ -45,11 +53,12 @@ export const Settings: React.FC = () => {
 
   const loadData = async () => {
     try {
-      const [sData, statData, pData, healthData] = await Promise.allSettled([
+      const [sData, statData, pData, healthData, aData] = await Promise.allSettled([
         api.getSettings(),
         api.getStatus(),
         api.getPerformanceSettings(),
         api.getExtractorHealth(),
+        api.getAuthStatus(),
       ]);
 
       if (sData.status === "fulfilled") {
@@ -71,6 +80,10 @@ export const Settings: React.FC = () => {
       if (healthData.status === "fulfilled") {
         setExtractorHealth(healthData.value);
       }
+      if (aData.status === "fulfilled") {
+        setAuthStatus(aData.value);
+        setAuthApproved(aData.value.user_approved);
+      }
     } catch {
       // Ignore
     }
@@ -90,6 +103,47 @@ export const Settings: React.FC = () => {
       setTestResult({ error: e.message || "Diagnostics failed" });
     } finally {
       setTestingDiagnostics(false);
+    }
+  };
+
+  const handleConnectChrome = async () => {
+    if (!authApproved) {
+      setAuthActionMessage("Please check the explicit approval checkbox before connecting.");
+      return;
+    }
+    setConnectingAuth(true);
+    setAuthActionMessage(null);
+    try {
+      const res = await api.connectBrowserAuth({
+        browser: "chrome",
+        user_approved: true,
+        acknowledge_disclaimer: authDisclaimerAccepted,
+      });
+      setAuthStatus(res);
+      setAuthActionMessage("Google Chrome browser session successfully connected.");
+      const h = await api.getExtractorHealth();
+      setExtractorHealth(h);
+    } catch (e: any) {
+      setAuthActionMessage(`Connection error: ${e.message || "Failed to connect"}`);
+    } finally {
+      setConnectingAuth(false);
+    }
+  };
+
+  const handleDisconnect = async () => {
+    setConnectingAuth(true);
+    setAuthActionMessage(null);
+    try {
+      const res = await api.disconnectAuth();
+      setAuthStatus(res);
+      setAuthApproved(false);
+      setAuthActionMessage("Disconnected. SaveXa is now in anonymous mode.");
+      const h = await api.getExtractorHealth();
+      setExtractorHealth(h);
+    } catch (e: any) {
+      setAuthActionMessage(`Disconnect error: ${e.message || "Failed to disconnect"}`);
+    } finally {
+      setConnectingAuth(false);
     }
   };
 
@@ -313,6 +367,108 @@ export const Settings: React.FC = () => {
           <span className="px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-semibold">
             {systemStatus?.ffmpeg_installed ? "Ready" : "Detected"}
           </span>
+        </div>
+      </div>
+
+      {/* Source Authentication Panel */}
+      <div className="rounded-2xl p-6 border border-[#1e293b] bg-[#0b1220] shadow-lg space-y-4">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-[#1e293b] pb-4">
+          <div>
+            <h3 className="text-sm font-bold text-white flex items-center gap-2">
+              <Key size={16} className="text-blue-400" /> Source Authentication (Local Browser Session)
+            </h3>
+            <p className="text-xs text-slate-400 mt-0.5">
+              Optional local source authentication for permitted sources via yt-dlp browser session. Runs 100% locally.
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <span
+              className={`px-3 py-1 rounded-full text-xs font-semibold border ${
+                authStatus?.is_connected
+                  ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-400"
+                  : "bg-slate-700/50 border-slate-600/30 text-slate-400"
+              }`}
+            >
+              {authStatus?.is_connected ? "Connected: Chrome" : "Anonymous Mode"}
+            </span>
+          </div>
+        </div>
+
+        {/* Security and Disclaimer Checkboxes */}
+        <div className="p-4 rounded-xl bg-[#111a2b] border border-[#26354c] space-y-3">
+          <label className="flex items-start gap-2.5 cursor-pointer text-xs text-slate-300">
+            <input
+              type="checkbox"
+              checked={authApproved}
+              onChange={(e) => setAuthApproved(e.target.checked)}
+              className="mt-0.5 accent-blue-600 rounded cursor-pointer"
+            />
+            <span>
+              <strong className="text-white">Explicit User Approval:</strong> I authorize SaveXa to use supported yt-dlp browser-session options with Google Chrome on this machine.
+            </span>
+          </label>
+
+          <label className="flex items-start gap-2.5 cursor-pointer text-xs text-slate-300">
+            <input
+              type="checkbox"
+              checked={authDisclaimerAccepted}
+              onChange={(e) => setAuthDisclaimerAccepted(e.target.checked)}
+              className="mt-0.5 accent-blue-600 rounded cursor-pointer"
+            />
+            <span>
+              <strong className="text-white">Source Restriction Disclaimer:</strong> I understand that authentication uses local session cookies only and cannot bypass DRM, copyright take-downs, or private memberships without account access.
+            </span>
+          </label>
+        </div>
+
+        {/* Browser Lock Notice if Chrome is running */}
+        {authStatus?.browser_lock_detected && (
+          <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-300 text-xs flex items-start gap-2.5">
+            <AlertCircle size={15} className="text-amber-400 shrink-0 mt-0.5" />
+            <div>
+              <p className="font-semibold text-white">Browser Database Lock Notice (Windows)</p>
+              <p className="text-[11px] text-amber-200/90 mt-0.5">
+                {authStatus.lock_reason || "Google Chrome is actively running and locking its cookie file. Close Chrome temporarily before bulk downloading, or export cookies to data/cookies.txt."}
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* Action Message */}
+        {authActionMessage && (
+          <p className="text-xs text-blue-300 font-mono bg-[#111a2b] p-2.5 rounded-lg border border-[#26354c]">
+            {authActionMessage}
+          </p>
+        )}
+
+        {/* Connect / Disconnect Buttons */}
+        <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+          <p className="text-[11px] text-slate-500">
+            Strict local isolation: cookies and credentials are never transmitted, logged, or exported.
+          </p>
+
+          <div className="flex items-center gap-2">
+            {authStatus?.is_connected ? (
+              <button
+                onClick={handleDisconnect}
+                disabled={connectingAuth}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-red-600/20 hover:bg-red-600/30 border border-red-500/30 text-red-300 hover:text-white text-xs font-bold transition-all cursor-pointer disabled:opacity-50"
+              >
+                <Unlock size={13} />
+                <span>Disconnect Session (Revert to Anonymous)</span>
+              </button>
+            ) : (
+              <button
+                onClick={handleConnectChrome}
+                disabled={connectingAuth}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold shadow-md shadow-blue-950/30 transition-all cursor-pointer disabled:opacity-50"
+              >
+                <Lock size={13} />
+                <span>{connectingAuth ? "Connecting..." : "Connect Chrome Session"}</span>
+              </button>
+            )}
+          </div>
         </div>
       </div>
 

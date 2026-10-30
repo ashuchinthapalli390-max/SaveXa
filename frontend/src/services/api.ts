@@ -1,4 +1,4 @@
-import { MediaMetadata, Job, Batch, SystemStatus, HistoryItem, LibraryItem, AppSettings, ImageItem, PerformanceSettings, PerformanceStatus, ExtractorHealth } from "../types";
+import { MediaMetadata, Job, Batch, SystemStatus, HistoryItem, LibraryItem, AppSettings, ImageItem, PerformanceSettings, PerformanceStatus, ExtractorHealth, AuthStatus, ConnectBrowserRequest } from "../types";
 
 const API_BASE = "/api";
 
@@ -201,5 +201,23 @@ export const api = {
     }),
   getPerformanceStatus: () => request<PerformanceStatus>("/performance/status"),
   getPerformanceDiagnostics: () => request<any>("/performance/diagnostics"),
+
+  // Source Authentication (Local Browser Session)
+  getAuthStatus: () => request<AuthStatus>("/auth/status"),
+  connectBrowserAuth: (data: ConnectBrowserRequest) =>
+    request<AuthStatus>("/auth/connect", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  disconnectAuth: () =>
+    request<AuthStatus>("/auth/disconnect", {
+      method: "POST",
+    }),
+  testAuthConnectivity: (sampleUrl?: string) => {
+    const params = sampleUrl ? `?sample_url=${encodeURIComponent(sampleUrl)}` : "";
+    return request<any>(`/auth/test${params}`, {
+      method: "POST",
+    });
+  },
 };
 
