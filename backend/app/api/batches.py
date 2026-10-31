@@ -37,12 +37,21 @@ async def create_batch(req: CreateBatchRequest):
 
             # Check destination directory for already completed media files
             target_path = Path(dest_dir)
+            existing_files_map = {}
             if target_path.is_dir():
                 for p in target_path.iterdir():
                     if p.is_file() and p.stat().st_size > 1024:
                         m = re.search(r'\[([0-9A-Za-z_-]{11})\]', p.name)
                         if m:
-                            existing_video_ids.add(m.group(1))
+                            v_id = m.group(1)
+                            existing_video_ids.add(v_id)
+                            existing_files_map[v_id] = p
+                        else:
+                            m_raw = re.findall(r'([0-9A-Za-z_-]{11})', p.name)
+                            if m_raw:
+                                v_id = m_raw[-1]
+                                existing_video_ids.add(v_id)
+                                existing_files_map[v_id] = p
 
         batch = Batch(
             id=batch_id,
@@ -68,11 +77,16 @@ async def create_batch(req: CreateBatchRequest):
             )
             job_status = "SKIPPED" if is_dup else ("QUEUED" if req.auto_start else "READY")
             
+            existing_file = existing_files_map.get(vid) if vid else None
+            out_p = str(existing_file.resolve()) if (is_dup and existing_file) else None
+            fn = existing_file.name if (is_dup and existing_file) else None
+            sz = existing_file.stat().st_size if (is_dup and existing_file) else 0
+
             job = DownloadJob(
                 id=str(uuid.uuid4()),
                 batch_id=batch_id,
                 source_url=item.url,
-                title=item.title or f"Media_{idx+1}",
+                title=item.title or (existing_file.stem if existing_file else f"Media_{idx+1}"),
                 creator=item.creator,
                 thumbnail_url=item.thumbnail,
                 duration=item.duration,
@@ -80,6 +94,11 @@ async def create_batch(req: CreateBatchRequest):
                 selected_format=item.format,
                 audio_bitrate=item.audio_bitrate,
                 destination_dir=dest_dir,
+                filename=fn,
+                output_path=out_p,
+                file_size=sz,
+                downloaded_bytes=sz,
+                progress=100.0 if (is_dup and existing_file) else 0.0,
                 status=job_status,
                 error_message="Skipped: already downloaded" if is_dup else None,
                 queue_position=idx,
@@ -88,6 +107,21 @@ async def create_batch(req: CreateBatchRequest):
             jobs.append(job)
             if is_dup:
                 batch.skipped_items += 1
+                if out_p:
+                    history = DownloadHistory(
+                        job_id=job.id,
+                        media_identifier=vid,
+                        media_type="video",
+                        title=job.title,
+                        thumbnail_url=item.thumbnail,
+                        output_path=out_p,
+                        file_size=sz,
+                        format=existing_file.suffix.lstrip(".") or item.format,
+                        quality=item.quality,
+                        duration=item.duration,
+                        source_url=item.url,
+                    )
+                    session.add(history)
 
         await session.commit()
         await session.refresh(batch)
@@ -111,10 +145,37 @@ async def create_batch(req: CreateBatchRequest):
 @router.get("", response_model=List[BatchResponse])
 async def list_batches():
     async with AsyncSessionLocal() as session:
-        stmt = select(Batch).order_by(desc(Batch.created_at))
+        stmt = select(Batch).options(selectinload(Batch.jobs)).order_by(desc(Batch.created_at))
         result = await session.execute(stmt)
         batches = result.scalars().all()
-        return [BatchResponse.model_validate(b) for b in batches]
+        responses = []
+        for b in batches:
+            if b.jobs:
+                completed_c = sum(1 for j in b.jobs if j.status == "COMPLETED")
+                failed_c = sum(1 for j in b.jobs if j.status == "FAILED")
+                skipped_c = sum(1 for j in b.jobs if j.status == "SKIPPED")
+                total_c = len(b.jobs)
+                status = b.status
+                if (completed_c + failed_c + skipped_c) >= total_c and total_c > 0:
+                    status = "completed" if (completed_c + skipped_c) > 0 else "failed"
+                responses.append(BatchResponse(
+                    id=b.id,
+                    name=b.name,
+                    total_items=total_c,
+                    completed_items=completed_c,
+                    failed_items=failed_c,
+                    skipped_items=skipped_c,
+                    selected_preset=b.selected_preset,
+                    destination_folder=b.destination_folder,
+                    concurrency=b.concurrency,
+                    status=status,
+                    created_at=b.created_at,
+                    completed_at=b.completed_at,
+                    jobs=[JobResponse.model_validate(j) for j in b.jobs]
+                ))
+            else:
+                responses.append(BatchResponse.model_validate(b))
+        return responses
 
 @router.get("/{batch_id}", response_model=BatchResponse)
 async def get_batch(batch_id: str):
@@ -125,17 +186,31 @@ async def get_batch(batch_id: str):
         if not batch:
             raise HTTPException(status_code=404, detail="Batch not found")
         
+        completed_c = sum(1 for j in batch.jobs if j.status == "COMPLETED")
+        failed_c = sum(1 for j in batch.jobs if j.status == "FAILED")
+        skipped_c = sum(1 for j in batch.jobs if j.status == "SKIPPED")
+        total_c = len(batch.jobs) if batch.jobs else batch.total_items
+        status = batch.status
+        if batch.jobs and (completed_c + failed_c + skipped_c) >= total_c and total_c > 0:
+            status = "completed" if (completed_c + skipped_c) > 0 else "failed"
+            if batch.status != status or batch.completed_items != completed_c:
+                batch.status = status
+                batch.completed_items = completed_c
+                batch.failed_items = failed_c
+                batch.skipped_items = skipped_c
+                await session.commit()
+        
         return BatchResponse(
             id=batch.id,
             name=batch.name,
-            total_items=batch.total_items,
-            completed_items=batch.completed_items,
-            failed_items=batch.failed_items,
-            skipped_items=batch.skipped_items,
+            total_items=total_c,
+            completed_items=completed_c,
+            failed_items=failed_c,
+            skipped_items=skipped_c,
             selected_preset=batch.selected_preset,
             destination_folder=batch.destination_folder,
             concurrency=batch.concurrency,
-            status=batch.status,
+            status=status,
             created_at=batch.created_at,
             completed_at=batch.completed_at,
             jobs=[JobResponse.model_validate(j) for j in batch.jobs]

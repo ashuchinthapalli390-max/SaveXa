@@ -33,8 +33,10 @@ async def get_library_items(
         res = await session.execute(stmt)
         records = res.scalars().all()
 
+        known_paths = set()
         for r in records:
             p = Path(r.output_path)
+            known_paths.add(str(p.resolve()) if r.output_path else "")
             exists = p.is_file()
             ext = p.suffix.lower().lstrip(".")
             mime, _ = mimetypes.guess_type(str(p))
@@ -65,6 +67,34 @@ async def get_library_items(
                 "exists_on_disk": exists,
                 "completed_at": r.completed_at,
             })
+
+        # Reconcile filesystem files in TRAILERS folder
+        trailer_dir = Path.home() / "Downloads" / "SaveXa" / "TRAILERS"
+        if trailer_dir.is_dir() and (not media_type or media_type in ("all", "video")):
+            for p in trailer_dir.glob("*.mp4"):
+                res_path = str(p.resolve())
+                if res_path not in known_paths and p.stat().st_size > 1024:
+                    known_paths.add(res_path)
+                    clean_title = p.stem
+                    # Strip source ID suffix if present
+                    clean_title = clean_title.rsplit(" [", 1)[0]
+                    if search and search.lower() not in clean_title.lower() and search.lower() not in p.name.lower():
+                        continue
+                    items.append({
+                        "id": abs(hash(res_path)) % 1000000 + 10000,
+                        "job_id": None,
+                        "title": clean_title,
+                        "output_path": res_path,
+                        "filename": p.name,
+                        "file_size": p.stat().st_size,
+                        "format": "mp4",
+                        "quality": "original",
+                        "duration": None,
+                        "media_type": "video",
+                        "mime_type": "video/mp4",
+                        "exists_on_disk": True,
+                        "completed_at": None,
+                    })
 
     return items
 

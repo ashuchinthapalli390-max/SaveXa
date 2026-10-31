@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import os
 import re
 import shutil
@@ -6,6 +7,8 @@ from pathlib import Path
 from typing import Callable, Any, Optional
 from urllib.parse import urlparse
 import yt_dlp
+
+logger = logging.getLogger("savexa.downloader.ytdlp")
 
 from app.core.config import settings
 from app.downloaders.base import BaseDownloader
@@ -129,7 +132,7 @@ class YtDlpDownloader(BaseDownloader):
             "buffersize": 1048576,
             "extractor_args": {
                 "youtube": {
-                    "player_client": ["android", "web"]
+                    "player_client": ["tv_embedded", "android", "mweb"]
                 }
             }
         }
@@ -176,114 +179,125 @@ class YtDlpDownloader(BaseDownloader):
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=False)
-                if not info:
-                    return MediaMetadata(
-                        url=url,
-                        title="Unknown Media",
-                        source="unknown",
-                        is_valid=False,
-                        error="Could not extract metadata from this source"
-                    )
+        except Exception as e:
+            if "cookiesfrombrowser" in ydl_opts and any(k in str(e).lower() for k in ["could not copy", "cookie database", "dpapi", "cookie"]):
+                logger.warning(f"Browser cookies extraction failed ({e}). Retrying analysis anonymously with player clients.")
+                fallback_opts = dict(ydl_opts)
+                fallback_opts.pop("cookiesfrombrowser", None)
+                with yt_dlp.YoutubeDL(fallback_opts) as ydl:
+                    info = ydl.extract_info(url, download=False)
+            else:
+                raise
 
-                is_playlist = info.get("_type") == "playlist" or "entries" in info
-                if is_playlist:
-                    entries = info.get("entries", [])
-                    playlist_items = []
-                    for entry in entries:
-                        if not entry:
-                            continue
-                        playlist_items.append(
-                            MediaMetadata(
-                                url=entry.get("url") or entry.get("webpage_url") or url,
-                                canonical_url=entry.get("webpage_url"),
-                                media_id=str(entry.get("id", "")),
-                                title=entry.get("title") or "Untitled Track",
-                                creator=entry.get("uploader") or entry.get("channel"),
-                                thumbnail=entry.get("thumbnail"),
-                                duration=float(entry.get("duration") or 0),
-                                source=info.get("extractor", "playlist"),
-                                is_playlist=False,
-                                is_valid=True
-                            )
-                        )
+        try:
+            if not info:
+                return MediaMetadata(
+                    url=url,
+                    title="Unknown Media",
+                    source="unknown",
+                    is_valid=False,
+                    error="Could not extract metadata from this source"
+                )
 
-                    return MediaMetadata(
-                        url=url,
-                        canonical_url=info.get("webpage_url") or url,
-                        media_id=str(info.get("id", "")),
-                        title=info.get("title") or "Playlist",
-                        creator=info.get("uploader") or info.get("channel"),
-                        thumbnail=info.get("thumbnail"),
-                        source=info.get("extractor", "playlist"),
-                        is_playlist=True,
-                        playlist_count=len(playlist_items),
-                        playlist_entries=playlist_items,
-                        available_qualities=["original", "1080p", "720p", "audio"],
-                        is_valid=True
-                    )
-
-                # Single video / audio item
-                formats_raw = info.get("formats", [])
-                format_options = []
-                qualities_set = set()
-
-                for f in formats_raw:
-                    height = f.get("height")
-                    ext = f.get("ext", "mp4")
-                    vcodec = f.get("vcodec")
-                    acodec = f.get("acodec")
-
-                    if height:
-                        q_label = f"{height}p"
-                        qualities_set.add(q_label)
-                    elif vcodec == "none" and acodec != "none":
-                        q_label = "audio"
-                        qualities_set.add("audio")
-                    else:
-                        q_label = "Original"
-
-                    format_options.append(
-                        FormatOption(
-                            format_id=str(f.get("format_id", "")),
-                            ext=ext,
-                            resolution=f"{f.get('width', '?')}x{height}" if height else "Audio Only",
-                            height=height,
-                            vcodec=vcodec,
-                            acodec=acodec,
-                            filesize=f.get("filesize"),
-                            filesize_approx=f.get("filesize_approx"),
-                            fps=f.get("fps"),
-                            quality_label=q_label
+            is_playlist = info.get("_type") == "playlist" or "entries" in info
+            if is_playlist:
+                entries = info.get("entries", [])
+                playlist_items = []
+                for entry in entries:
+                    if not entry:
+                        continue
+                    playlist_items.append(
+                        MediaMetadata(
+                            url=entry.get("url") or entry.get("webpage_url") or url,
+                            canonical_url=entry.get("webpage_url"),
+                            media_id=str(entry.get("id", "")),
+                            title=entry.get("title") or "Untitled Track",
+                            creator=entry.get("uploader") or entry.get("channel"),
+                            thumbnail=entry.get("thumbnail"),
+                            duration=float(entry.get("duration") or 0),
+                            source=info.get("extractor", "playlist"),
+                            is_playlist=False,
+                            is_valid=True
                         )
                     )
-
-                # Sort available qualities in descending order
-                def sort_q(q):
-                    if q == "audio":
-                        return 0
-                    nums = re.findall(r'\d+', q)
-                    return int(nums[0]) if nums else 9999
-
-                sorted_qualities = sorted(list(qualities_set), key=sort_q, reverse=True)
-                if "original" not in sorted_qualities:
-                    sorted_qualities.insert(0, "original")
 
                 return MediaMetadata(
                     url=url,
                     canonical_url=info.get("webpage_url") or url,
                     media_id=str(info.get("id", "")),
-                    title=info.get("title") or "Untitled Media",
+                    title=info.get("title") or "Playlist",
                     creator=info.get("uploader") or info.get("channel"),
                     thumbnail=info.get("thumbnail"),
-                    duration=float(info.get("duration") or 0),
-                    source=info.get("extractor", "web"),
-                    is_playlist=False,
-                    available_qualities=sorted_qualities,
-                    formats=format_options,
-                    is_valid=True,
-                    analysis_status=AnalysisStatus.AVAILABLE,
-                    is_selectable=True,
+                    source=info.get("extractor", "playlist"),
+                    is_playlist=True,
+                    playlist_count=len(playlist_items),
+                    playlist_entries=playlist_items,
+                    available_qualities=["original", "1080p", "720p", "audio"],
+                    is_valid=True
                 )
+
+            # Single video / audio item
+            formats_raw = info.get("formats", [])
+            format_options = []
+            qualities_set = set()
+
+            for f in formats_raw:
+                height = f.get("height")
+                ext = f.get("ext", "mp4")
+                vcodec = f.get("vcodec")
+                acodec = f.get("acodec")
+
+                if height:
+                    q_label = f"{height}p"
+                    qualities_set.add(q_label)
+                elif vcodec == "none" and acodec != "none":
+                    q_label = "audio"
+                    qualities_set.add("audio")
+                else:
+                    q_label = "Original"
+
+                format_options.append(
+                    FormatOption(
+                        format_id=str(f.get("format_id", "")),
+                        ext=ext,
+                        resolution=f"{f.get('width', '?')}x{height}" if height else "Audio Only",
+                        height=height,
+                        vcodec=vcodec,
+                        acodec=acodec,
+                        filesize=f.get("filesize"),
+                        filesize_approx=f.get("filesize_approx"),
+                        fps=f.get("fps"),
+                        quality_label=q_label
+                    )
+                )
+
+            # Sort available qualities in descending order
+            def sort_q(q):
+                if q == "audio":
+                    return 0
+                nums = re.findall(r'\d+', q)
+                return int(nums[0]) if nums else 9999
+
+            sorted_qualities = sorted(list(qualities_set), key=sort_q, reverse=True)
+            if "original" not in sorted_qualities:
+                sorted_qualities.insert(0, "original")
+
+            return MediaMetadata(
+                url=url,
+                canonical_url=info.get("webpage_url") or url,
+                media_id=str(info.get("id", "")),
+                title=info.get("title") or "Untitled Media",
+                creator=info.get("uploader") or info.get("channel"),
+                thumbnail=info.get("thumbnail"),
+                duration=float(info.get("duration") or 0),
+                source=info.get("extractor", "web"),
+                is_playlist=False,
+                available_qualities=sorted_qualities,
+                formats=format_options,
+                is_valid=True,
+                analysis_status=AnalysisStatus.AVAILABLE,
+                is_selectable=True,
+            )
         except Exception as e:
             status, code, user_msg, action = classify_ytdlp_error(url, e)
             fallback_title, detected_source = extract_fallback_title(url)
@@ -468,15 +482,29 @@ class YtDlpDownloader(BaseDownloader):
             else:
                 ydl_opts["merge_output_format"] = "mp4"
 
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=True)
-            if not info:
-                raise RuntimeError("yt-dlp returned no info for download")
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=True)
+                prepared_filename = ydl.prepare_filename(info) if info else None
+        except Exception as e:
+            if "cookiesfrombrowser" in ydl_opts and any(k in str(e).lower() for k in ["could not copy", "cookie database", "dpapi", "cookie"]):
+                logger.warning(f"Browser cookies extraction failed ({e}). Retrying download anonymously with player clients.")
+                fallback_opts = dict(ydl_opts)
+                fallback_opts.pop("cookiesfrombrowser", None)
+                with yt_dlp.YoutubeDL(fallback_opts) as ydl:
+                    info = ydl.extract_info(url, download=True)
+                    prepared_filename = ydl.prepare_filename(info) if info else None
+            else:
+                raise
 
-            # Determine final file path
-            final_path = None
-            try:
-                prepared = Path(ydl.prepare_filename(info))
+        if not info:
+            raise RuntimeError("yt-dlp returned no info for download")
+
+        # Determine final file path
+        final_path = None
+        try:
+            if prepared_filename:
+                prepared = Path(prepared_filename)
                 candidates = [prepared]
                 if is_audio_mode:
                     candidates.insert(0, prepared.with_suffix(f".{target_ext}"))
@@ -487,38 +515,46 @@ class YtDlpDownloader(BaseDownloader):
                     if cand.exists():
                         final_path = str(cand.resolve())
                         break
-            except Exception:
-                pass
+        except Exception:
+            pass
 
-            if not final_path and downloaded_file_holder:
-                for candidate in downloaded_file_holder:
-                    cand_p = Path(candidate)
-                    if cand_p.exists():
-                        final_path = str(cand_p.resolve())
-                        break
-                    target_candidate = cand_p.with_suffix(f".{format_type}")
-                    if target_candidate.exists():
-                        final_path = str(target_candidate.resolve())
-                        break
+        if not final_path and downloaded_file_holder:
+            for candidate in downloaded_file_holder:
+                cand_p = Path(candidate)
+                if cand_p.exists():
+                    final_path = str(cand_p.resolve())
+                    break
+                target_candidate = cand_p.with_suffix(f".{format_type}")
+                if target_candidate.exists():
+                    final_path = str(target_candidate.resolve())
+                    break
 
-            if not final_path:
-                files = sorted(dest_path.glob("*"), key=lambda p: p.stat().st_mtime, reverse=True)
-                if files:
-                    final_path = str(files[0].resolve())
-                else:
-                    raise RuntimeError("Download completed but output file could not be found")
+        if not final_path:
+            # Look for file matching video ID in destination
+            m_id = re.search(r"(?:v=|\/)([0-9A-Za-z_-]{11})", url)
+            if m_id:
+                matching = [p for p in dest_path.glob(f"*{m_id.group(1)}*") if p.is_file() and p.stat().st_size > 1024]
+                if matching:
+                    final_path = str(matching[0].resolve())
 
-            # Final success callback
-            final_size = Path(final_path).stat().st_size
-            progress_callback({
-                "status": "COMPLETED",
-                "downloaded_bytes": final_size,
-                "total_bytes": final_size,
-                "progress": 100.0,
-                "speed": 0.0,
-                "eta": 0,
-                "output_path": final_path,
-            })
+        if not final_path:
+            files = sorted(dest_path.glob("*"), key=lambda p: p.stat().st_mtime, reverse=True)
+            if files:
+                final_path = str(files[0].resolve())
+            else:
+                raise RuntimeError("Download completed but output file could not be found")
 
-            return final_path
+        # Final success callback
+        final_size = Path(final_path).stat().st_size
+        progress_callback({
+            "status": "COMPLETED",
+            "downloaded_bytes": final_size,
+            "total_bytes": final_size,
+            "progress": 100.0,
+            "speed": 0.0,
+            "eta": 0,
+            "output_path": final_path,
+        })
+
+        return final_path
 

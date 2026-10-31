@@ -23,11 +23,39 @@ backend/wheels/
 .installed.cfg
 *.egg
 
-# Database & Data
+# Database & SQLite files
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+backend/*.db
+backend/*.db-wal
+backend/*.db-shm
 data/*.db
 data/*.db-wal
 data/*.db-shm
 data/temp/
+
+# User Data, Catalogs & Local Downloads (Never commit personal data or media)
+data/trailers_catalog*
+data/trailers_master*
+backend/scripts/
+downloads/
+Downloads/
+TRAILERS/
+*.mp4
+*.mkv
+*.webm
+*.avi
+*.mov
+*.part
+*.ytdl
+*manifest*.csv
+failed_links*.txt
+download_summary*.json
+
+# Logs
 logs/*.log
 *.zip
 
